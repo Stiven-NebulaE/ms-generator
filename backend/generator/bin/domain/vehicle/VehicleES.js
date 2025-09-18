@@ -25,7 +25,7 @@ class VehicleES {
     generateEventProcessorMap() {
         return {
             'Vehicle': {
-                "VehicleGenerated": { fn: instance.handleVehicleGenerated$, instance, processOnlyOnSync: false },
+                "Generated": { fn: instance.handleVehicleGenerated$, instance, processOnlyOnSync: false },
             }
         }
     };

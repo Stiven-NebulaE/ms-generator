@@ -201,7 +201,7 @@ class VehicleCRUD {
     
     return {
       at: "Vehicle",
-      et: "VehicleGenerated",
+      et: "Generated",
       aid: aid,
       timestamp: new Date().toISOString(),
       data: vehicleData
