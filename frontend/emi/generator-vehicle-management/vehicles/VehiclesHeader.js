@@ -29,19 +29,21 @@ function VehiclesHeader({
                             label={isGenerating ? "Corriendo..." : "Detenido"} 
                             color={isGenerating ? "secondary" : "default"}
                             variant="outlined"
+                            className="text-white ml-1"
                         />
-                        <Typography variant="body1">
+                        <Typography variant="body1" className="ml-2">
                             | Vehículos Generados: {totalVehicles.toLocaleString()}
                         </Typography>
                     </Box>
                 </Box>
-                <Box display="flex" gap={2}>
+                <Box gap={2} className="grid md:flex">
                     <Button
                         variant="contained"
                         color="secondary"
                         startIcon={<PlayArrow />}
                         onClick={onStartGeneration}
                         disabled={isGenerating}
+                        className="md:mr-3 mb-3 md:mb-0"
                     >
                         Iniciar Simulación
                     </Button>
