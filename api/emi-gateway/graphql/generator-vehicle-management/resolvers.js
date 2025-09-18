@@ -117,11 +117,11 @@ const eventDescriptors = [
     {
         backendEventName: "VEHICLE_GENERATED",
         gqlSubscriptionName: "VehicleMngVehicleGenerated",
-        dataExtractor: evt => evt.data, // OPTIONAL, only use if needed
+        dataExtractor: evt => evt.data.data, // Extract the actual vehicle data
         onError: (error, descriptor) =>
             console.log(`Error processing ${descriptor.backendEventName}`), // OPTIONAL, only use if needed
         onEvent: (evt, descriptor) =>
-            console.log(`Event of type  ${descriptor.backendEventName} arrived`) // OPTIONAL, only use if needed
+            console.log(`Event of type  ${descriptor.backendEventName} arrived:`, JSON.stringify(evt)) // OPTIONAL, only use if needed
     }
 ];
 

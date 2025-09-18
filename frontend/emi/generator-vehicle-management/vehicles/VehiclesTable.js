@@ -4,7 +4,10 @@ import { Table, TableBody, TableCell, TableHead, TableRow, Paper, Typography, Bo
 
 function VehiclesTable({ vehicles, totalVehicles }) {
     // Memoize the vehicle data to prevent unnecessary re-renders
-    const vehicleData = useMemo(() => vehicles, [vehicles]);
+    const vehicleData = useMemo(() => {
+        console.log('VehiclesTable - vehicles received:', vehicles);
+        return vehicles;
+    }, [vehicles]);
 
     // Virtualized row component
     const VehicleRow = ({ index, style }) => {
@@ -13,13 +16,23 @@ function VehiclesTable({ vehicles, totalVehicles }) {
 
         return (
             <div style={style}>
-                <TableRow hover>
-                    <TableCell>{vehicle.data.year}</TableCell>
-                    <TableCell>{vehicle.data.type}</TableCell>
-                    <TableCell>{vehicle.data.hp}</TableCell>
-                    <TableCell>{vehicle.data.topSpeed}</TableCell>
-                    <TableCell>{vehicle.data.powerSource}</TableCell>
-                </TableRow>
+                <div style={{ display: 'flex', alignItems: 'center', height: '48px', borderBottom: '1px solid #e0e0e0' }}>
+                    <div style={{ width: '20%', padding: '0 16px', textAlign: 'left' }}>
+                        {vehicle.data ? vehicle.data.year : vehicle.year}
+                    </div>
+                    <div style={{ width: '20%', padding: '0 16px', textAlign: 'left' }}>
+                        {vehicle.data ? vehicle.data.type : vehicle.type}
+                    </div>
+                    <div style={{ width: '20%', padding: '0 16px', textAlign: 'left' }}>
+                        {vehicle.data ? vehicle.data.hp : vehicle.hp}
+                    </div>
+                    <div style={{ width: '20%', padding: '0 16px', textAlign: 'left' }}>
+                        {vehicle.data ? vehicle.data.topSpeed : vehicle.topSpeed}
+                    </div>
+                    <div style={{ width: '20%', padding: '0 16px', textAlign: 'left' }}>
+                        {vehicle.data ? vehicle.data.powerSource : vehicle.powerSource}
+                    </div>
+                </div>
             </div>
         );
     };
@@ -38,11 +51,11 @@ function VehiclesTable({ vehicles, totalVehicles }) {
             <Table>
                 <TableHead>
                     <TableRow>
-                        <TableCell>Año</TableCell>
-                        <TableCell>Tipo</TableCell>
-                        <TableCell>Potencia (HP)</TableCell>
-                        <TableCell>Vel. Máxima (km/h)</TableCell>
-                        <TableCell>Power Source</TableCell>
+                        <TableCell style={{ width: '20%' }}>Año</TableCell>
+                        <TableCell style={{ width: '20%' }}>Tipo</TableCell>
+                        <TableCell style={{ width: '20%' }}>Potencia (HP)</TableCell>
+                        <TableCell style={{ width: '20%' }}>Vel. Máxima (km/h)</TableCell>
+                        <TableCell style={{ width: '20%' }}>Power Source</TableCell>
                     </TableRow>
                 </TableHead>
             </Table>

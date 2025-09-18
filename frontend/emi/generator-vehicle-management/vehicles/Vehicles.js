@@ -31,22 +31,19 @@ function Vehicles() {
 
     // Handle subscription data
     useEffect(() => {
+        console.log('Subscription data received:', subscriptionData);
         if (subscriptionData && subscriptionData.VehicleMngVehicleGenerated) {
-            const now = Date.now();
+            console.log('Vehicle generated event:', subscriptionData.VehicleMngVehicleGenerated);
+            const vehicleData = subscriptionData.VehicleMngVehicleGenerated;
             
-            // Only update if more than 1 second has passed since last render
-            if (now - lastRenderTime.current > 1000) {
-                setVehicles(prevVehicles => {
-                    const newVehicles = [...prevVehicles, subscriptionData.VehicleMngVehicleGenerated];
-
-                    console.log('newVehicles', newVehicles);
-                    
-                    // Keep only last 1000 vehicles for performance
-                    return newVehicles.slice(-1000);
-                });
-                setTotalVehicles(prev => prev + 1);
-                lastRenderTime.current = now;
-            }
+            setVehicles(prevVehicles => {
+                const newVehicles = [...prevVehicles, vehicleData];
+                console.log('newVehicles', newVehicles);
+                
+                // Keep only last 1000 vehicles for performance
+                return newVehicles.slice(-1000);
+            });
+            setTotalVehicles(prev => prev + 1);
         }
     }, [subscriptionData]);
 

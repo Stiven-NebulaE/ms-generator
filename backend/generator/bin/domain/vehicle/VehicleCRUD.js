@@ -10,17 +10,27 @@ const { ConsoleLogger } = require('@nebulae/backend-node-tools').log;
 const { CustomError, INTERNAL_SERVER_ERROR_CODE, PERMISSION_DENIED } = require("@nebulae/backend-node-tools").error;
 const { brokerFactory } = require("@nebulae/backend-node-tools").broker;
 
-const broker = brokerFactory();
-const eventSourcing = require("../../tools/event-sourcing").eventSourcing;
-const VehicleDA = require("./data-access/VehicleDA");
-const MqttBroker = require("@nebulae/backend-node-tools").broker.MqttBroker;
-
 const READ_ROLES = ["VEHICLE_READ"];
 const WRITE_ROLES = ["VEHICLE_WRITE"];
 const REQUIRED_ATTRIBUTES = [];
 const MATERIALIZED_VIEW_TOPIC = "emi-gateway-materialized-view-updates";
 const VEHICLE_GENERATED_TOPIC = "fleet/vehicles/generated";
 const WEBSOCKET_TOPIC = "emi-gateway-websocket-updates";
+
+const broker = brokerFactory();
+const eventSourcing = require("../../tools/event-sourcing").eventSourcing;
+const VehicleDA = require("./data-access/VehicleDA");
+const MqttBroker = require("@nebulae/backend-node-tools").broker.MqttBroker;
+
+// Create MQTT broker for materialized view updates
+const mqttBroker = new MqttBroker({
+  gatewayRepliesTopic: "emi-gateway-replies-topic-mbe-generator",
+  gatewayEventsTopic: "Events",
+  materializedViewTopic: MATERIALIZED_VIEW_TOPIC,
+  projectId: process.env.GCLOUD_PROJECT_ID,
+  mqttServerUrl: process.env.MQTT_SERVER_URL,
+  replyTimeout: process.env.REPLY_TIMEOUT || 2000
+});
 
 /**
  * Singleton instance
@@ -100,6 +110,18 @@ class VehicleCRUD {
           timestamp: new Date().toISOString()
         }).subscribe();
         
+        // Send to materialized view updates for GraphQL subscriptions
+        mqttBroker.send$(MATERIALIZED_VIEW_TOPIC, 'VEHICLE_GENERATED', {
+          type: 'VEHICLE_GENERATED',
+          data: {
+            timestamp: new Date().toISOString(),
+            data: vehicle
+          }
+        }).subscribe({
+          next: () => ConsoleLogger.i(`Materialized view event sent successfully`),
+          error: (error) => ConsoleLogger.e(`Materialized view event error: ${error.message}`)
+        });
+        
         ConsoleLogger.i(`Vehicle generated: ${JSON.stringify(vehicle)}`);
       })
     );
@@ -139,6 +161,7 @@ class VehicleCRUD {
    * Gets generation status
    */
   getGenerationStatus$({ root, args, jwt }, authToken) {
+    console.log(`Hace get status <========`);
     return of({ 
       isGenerating: this.isGenerating,
       status: this.isGenerating ? "running" : "stopped"
