@@ -9,15 +9,25 @@ import VehiclesHeader from './VehiclesHeader';
 import VehiclesTable from './VehiclesTable';
 import reducer from '../store/reducers';
 
+// Constants for better maintainability
+const CONFIG = {
+    UI_UPDATE_INTERVAL: 1000, // 1 second debounce
+    MAX_VEHICLES_IN_MEMORY: 1000, // Performance optimization
+    STATUS_POLL_INTERVAL: 1000,
+};
+
+const formatTimestamp = (timestamp) => new Date(timestamp).toISOString();
+
 function Vehicles() {
     const user = useSelector(({ auth }) => auth.user);
     const [vehicles, setVehicles] = useState([]);
     const [totalVehicles, setTotalVehicles] = useState(0);
+    const [displayVehicles, setDisplayVehicles] = useState([]);
     const lastRenderTime = useRef(0);
 
     // GraphQL queries and mutations
     const { data: statusData, refetch: refetchStatus } = useQuery(VehicleMngGenerationStatus, {
-        pollInterval: 1000,
+        pollInterval: CONFIG.STATUS_POLL_INTERVAL,
         fetchPolicy: 'network-only'
     });
 
@@ -27,6 +37,7 @@ function Vehicles() {
     // GraphQL subscription for real-time vehicle updates
     const { data: subscriptionData } = useSubscription(VehicleGeneratedSubscription);
 
+    // Safely extract generation status
     const isGenerating = statusData && statusData.VehicleMngGenerationStatus && statusData.VehicleMngGenerationStatus.isGenerating || false;
 
     // Handle subscription data
@@ -40,12 +51,47 @@ function Vehicles() {
                 const newVehicles = [...prevVehicles, vehicleData];
                 console.log('newVehicles', newVehicles);
                 
-                // Keep only last 1000 vehicles for performance
-                return newVehicles.slice(-1000);
+                // Keep only last N vehicles for performance
+                return newVehicles.slice(-CONFIG.MAX_VEHICLES_IN_MEMORY);
             });
             setTotalVehicles(prev => prev + 1);
         }
     }, [subscriptionData]);
+
+    // Update display vehicles only every 1 second to optimize re-renders
+    useEffect(() => {
+        const now = Date.now();
+        if (now - lastRenderTime.current >= CONFIG.UI_UPDATE_INTERVAL) {
+            console.log('⏰ Actualizando UI - Han pasado más de 1 segundo:', {
+                vehiclesInMemory: vehicles.length,
+                lastUpdate: formatTimestamp(lastRenderTime.current),
+                currentTime: formatTimestamp(now)
+            });
+            setDisplayVehicles(vehicles);
+            lastRenderTime.current = now;
+        } else {
+            // Schedule update for when 1 second has passed
+            const timeSinceLastRender = now - lastRenderTime.current;
+            const timeUntilNextRender = CONFIG.UI_UPDATE_INTERVAL - timeSinceLastRender;
+            
+            console.log('⏳ Debounce activo - Esperando para actualizar UI:', {
+                vehiclesInMemory: vehicles.length,
+                timeSinceLastRender: `${timeSinceLastRender}ms`,
+                timeUntilNextRender: `${timeUntilNextRender}ms`
+            });
+            
+            const timeoutId = setTimeout(() => {
+                console.log('⏰ Actualización programada ejecutada:', {
+                    vehiclesInMemory: vehicles.length,
+                    timestamp: formatTimestamp(Date.now())
+                });
+                setDisplayVehicles(vehicles);
+                lastRenderTime.current = Date.now();
+            }, timeUntilNextRender);
+            
+            return () => clearTimeout(timeoutId);
+        }
+    }, [vehicles]);
 
     const handleStartGeneration = useCallback(async () => {
         try {
@@ -78,7 +124,7 @@ function Vehicles() {
                 onStopGeneration={handleStopGeneration}
             />
             <VehiclesTable 
-                vehicles={vehicles}
+                vehicles={displayVehicles}
                 totalVehicles={totalVehicles}
             />
         </Box>

@@ -88,7 +88,7 @@ class VehicleCRUD {
         const vehicle = this.generateRandomVehicle();
         const event = this.createVehicleGeneratedEvent(vehicle);
         
-        // Publish to MQTT as specified in the activity requirements
+        // Publish to MQTT
         ConsoleLogger.i(`Creating event with: at=${event.at}, et=${event.et}, aid=${event.aid}`);
         
         const mqttTopic = 'fleet/vehicles/generated';
