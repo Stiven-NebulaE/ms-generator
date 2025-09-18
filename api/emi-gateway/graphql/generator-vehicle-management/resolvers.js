@@ -71,30 +71,24 @@ module.exports = {
 
     //// QUERY ///////
     Query: {
-        GeneratorVehicleListing(root, args, context) {
-            return sendToBackEndHandler$(root, args, context, READ_ROLES, 'query', 'Vehicle', 'GeneratorVehicleListing').toPromise();
-        },
-        GeneratorVehicle(root, args, context) {
-            return sendToBackEndHandler$(root, args, context, READ_ROLES, 'query', 'Vehicle', 'GeneratorVehicle').toPromise();
+        VehicleMngGenerationStatus(root, args, context) {
+            return sendToBackEndHandler$(root, args, context, READ_ROLES, 'query', 'Vehicle', 'VehicleMngGenerationStatus').toPromise();
         }
     },
 
     //// MUTATIONS ///////
     Mutation: {
-        GeneratorCreateVehicle(root, args, context) {
-            return sendToBackEndHandler$(root, args, context, WRITE_ROLES, 'mutation', 'Vehicle', 'GeneratorCreateVehicle').toPromise();
+        VehicleMngStartGeneration(root, args, context) {
+            return sendToBackEndHandler$(root, args, context, WRITE_ROLES, 'mutation', 'Vehicle', 'VehicleMngStartGeneration').toPromise();
         },
-        GeneratorUpdateVehicle(root, args, context) {
-            return sendToBackEndHandler$(root, args, context, WRITE_ROLES, 'mutation', 'Vehicle', 'GeneratorUpdateVehicle').toPromise();
-        },
-        GeneratorDeleteVehicles(root, args, context) {
-            return sendToBackEndHandler$(root, args, context, WRITE_ROLES, 'mutation', 'Vehicle', 'GeneratorDeleteVehicles').toPromise();
-        },
+        VehicleMngStopGeneration(root, args, context) {
+            return sendToBackEndHandler$(root, args, context, WRITE_ROLES, 'mutation', 'Vehicle', 'VehicleMngStopGeneration').toPromise();
+        }
     },
 
     //// SUBSCRIPTIONS ///////
     Subscription: {
-        GeneratorVehicleModified: {
+        VehicleMngVehicleGenerated: {
             subscribe: withFilter(
                 (payload, variables, context, info) => {
                     //Checks the roles of the user, if the user does not have at least one of the required roles, an error will be thrown
@@ -102,16 +96,14 @@ module.exports = {
                         context.authToken.realm_access.roles,
                         READ_ROLES,
                         "Generator",
-                        "GeneratorVehicleModified",
+                        "VehicleMngVehicleGenerated",
                         PERMISSION_DENIED_ERROR_CODE,
                         "Permission denied"
                     );
-                    return pubsub.asyncIterator("GeneratorVehicleModified");
+                    return pubsub.asyncIterator("VehicleMngVehicleGenerated");
                 },
                 (payload, variables, context, info) => {
-                    return payload
-                        ? (payload.GeneratorVehicleModified.id === variables.id) || (variables.id === "ANY")
-                        : false;
+                    return payload ? true : false;
                 }
             )
         }
@@ -123,8 +115,8 @@ module.exports = {
 
 const eventDescriptors = [
     {
-        backendEventName: "GeneratorVehicleModified",
-        gqlSubscriptionName: "GeneratorVehicleModified",
+        backendEventName: "VEHICLE_GENERATED",
+        gqlSubscriptionName: "VehicleMngVehicleGenerated",
         dataExtractor: evt => evt.data, // OPTIONAL, only use if needed
         onError: (error, descriptor) =>
             console.log(`Error processing ${descriptor.backendEventName}`), // OPTIONAL, only use if needed

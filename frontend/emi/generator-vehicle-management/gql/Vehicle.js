@@ -1,5 +1,52 @@
 import { gql } from 'apollo-boost';
 
+// Query to get generation status
+export const VehicleMngGenerationStatus = gql`
+    query VehicleMngGenerationStatus {
+        VehicleMngGenerationStatus {
+            isGenerating
+            status
+        }
+    }
+`;
+
+// Mutation to start vehicle generation
+export const VehicleMngStartGeneration = gql`
+    mutation VehicleMngStartGeneration {
+        VehicleMngStartGeneration {
+            code
+            message
+        }
+    }
+`;
+
+// Mutation to stop vehicle generation
+export const VehicleMngStopGeneration = gql`
+    mutation VehicleMngStopGeneration {
+        VehicleMngStopGeneration {
+            code
+            message
+        }
+    }
+`;
+
+// Subscription for real-time vehicle generation events
+export const VehicleGeneratedSubscription = gql`
+    subscription VehicleGenerated {
+        VehicleMngVehicleGenerated {
+            timestamp
+            data {
+                type
+                powerSource
+                hp
+                year
+                topSpeed
+            }
+        }
+    }
+`;
+
+// Legacy queries (keeping for compatibility)
 export const GeneratorVehicleListing = (variables) => ({
     query: gql`
             query GeneratorVehicleListing($filterInput:GeneratorVehicleFilterInput ,$paginationInput:GeneratorVehiclePaginationInput,$sortInput:GeneratorVehicleSortInput){
@@ -25,7 +72,6 @@ export const GeneratorVehicle = (variables) => ({
     variables,
     fetchPolicy: 'network-only',
 })
-
 
 export const GeneratorCreateVehicle = (variables) => ({
     mutation: gql`

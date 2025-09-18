@@ -1,10 +1,8 @@
 'use strict'
 
-const { iif } = require("rxjs");
+const { of } = require("rxjs");
 const { tap } = require('rxjs/operators');
 const { ConsoleLogger } = require('@nebulae/backend-node-tools').log;
-
-const VehicleDA = require("./data-access/VehicleDA");
 /**
  * Singleton instance
  * @type { VehicleES }
@@ -27,30 +25,23 @@ class VehicleES {
     generateEventProcessorMap() {
         return {
             'Vehicle': {
-                "VehicleModified": { fn: instance.handleVehicleModified$, instance, processOnlyOnSync: true },
+                "VehicleGenerated": { fn: instance.handleVehicleGenerated$, instance, processOnlyOnSync: false },
             }
         }
     };
 
     /**
-     * Using the VehicleModified events restores the MaterializedView
-     * This is just a recovery strategy
-     * @param {*} VehicleModifiedEvent Vehicle Modified Event
+     * Handle VehicleGenerated events
+     * @param {*} VehicleGeneratedEvent Vehicle Generated Event
      */
-    handleVehicleModified$({ etv, aid, av, data, user, timestamp }) {
-        const aggregateDataMapper = [
-            /*etv=0 mapper*/ () => { throw new Error('etv 0 is not an option') },
-            /*etv=1 mapper*/ (eventData) => { return { ...eventData, modType: undefined }; }
-        ];
-        delete aggregateDataMapper.modType;
-        const aggregateData = aggregateDataMapper[etv](data);
-        return iif(
-            () => (data.modType === 'DELETE'),
-            VehicleDA.deleteVehicle$(aid),
-            VehicleDA.updateVehicleFromRecovery$(aid, aggregateData, av)
-        ).pipe(
-            tap(() => ConsoleLogger.i(`VehicleES.handleVehicleModified: ${data.modType}: aid=${aid}, timestamp=${timestamp}`))
-        )
+    handleVehicleGenerated$({ etv, aid, av, data, user, timestamp }) {
+        ConsoleLogger.i(`VehicleES.handleVehicleGenerated: aid=${aid}, timestamp=${timestamp}, data=${JSON.stringify(data)}`);
+        
+        // For this PoC, we don't need to store individual vehicles
+        // The ms-reporter will handle the aggregation
+        return of({ success: true }).pipe(
+            tap(() => ConsoleLogger.i(`VehicleES.handleVehicleGenerated: Processed vehicle ${aid}`))
+        );
     }
 }
 

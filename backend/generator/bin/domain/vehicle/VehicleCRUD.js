@@ -1,8 +1,8 @@
 "use strict";
 
-const uuidv4 = require("uuid/v4");
-const { of, forkJoin, from, iif, throwError } = require("rxjs");
-const { mergeMap, catchError, map, toArray, pluck } = require('rxjs/operators');
+const crypto = require("crypto");
+const { of, forkJoin, from, iif, throwError, Subject, interval, EMPTY } = require("rxjs");
+const { mergeMap, catchError, map, toArray, pluck, takeUntil, tap, filter } = require('rxjs/operators');
 
 const Event = require("@nebulae/event-store").Event;
 const { CqrsResponseHelper } = require('@nebulae/backend-node-tools').cqrs;
@@ -13,11 +13,14 @@ const { brokerFactory } = require("@nebulae/backend-node-tools").broker;
 const broker = brokerFactory();
 const eventSourcing = require("../../tools/event-sourcing").eventSourcing;
 const VehicleDA = require("./data-access/VehicleDA");
+const MqttBroker = require("@nebulae/backend-node-tools").broker.MqttBroker;
 
 const READ_ROLES = ["VEHICLE_READ"];
 const WRITE_ROLES = ["VEHICLE_WRITE"];
 const REQUIRED_ATTRIBUTES = [];
 const MATERIALIZED_VIEW_TOPIC = "emi-gateway-materialized-view-updates";
+const VEHICLE_GENERATED_TOPIC = "fleet/vehicles/generated";
+const WEBSOCKET_TOPIC = "emi-gateway-websocket-updates";
 
 /**
  * Singleton instance
@@ -27,6 +30,13 @@ let instance;
 
 class VehicleCRUD {
   constructor() {
+    this.generationSubject = new Subject();
+    this.stopGenerationSubject = new Subject();
+    this.isGenerating = false;
+    this.mqttBroker = new MqttBroker({
+      mqttServerUrl: process.env.MQTT_SERVER_URL || 'mqtt://localhost:1883',
+      replyTimeout: 2000
+    });
   }
 
   /**     
@@ -40,133 +50,139 @@ class VehicleCRUD {
   generateRequestProcessorMap() {
     return {
       'Vehicle': {
-        "emigateway.graphql.query.GeneratorVehicleListing": { fn: instance.getGeneratorVehicleListing$, instance, jwtValidation: { roles: READ_ROLES, attributes: REQUIRED_ATTRIBUTES } },
-        "emigateway.graphql.query.GeneratorVehicle": { fn: instance.getVehicle$, instance, jwtValidation: { roles: READ_ROLES, attributes: REQUIRED_ATTRIBUTES } },
-        "emigateway.graphql.mutation.GeneratorCreateVehicle": { fn: instance.createVehicle$, instance, jwtValidation: { roles: WRITE_ROLES, attributes: REQUIRED_ATTRIBUTES } },
-        "emigateway.graphql.mutation.GeneratorUpdateVehicle": { fn: instance.updateVehicle$, jwtValidation: { roles: WRITE_ROLES, attributes: REQUIRED_ATTRIBUTES } },
-        "emigateway.graphql.mutation.GeneratorDeleteVehicles": { fn: instance.deleteVehicles$, jwtValidation: { roles: WRITE_ROLES, attributes: REQUIRED_ATTRIBUTES } },
+        "emigateway.graphql.mutation.VehicleMngStartGeneration": { fn: instance.startGeneration$, instance, jwtValidation: { roles: WRITE_ROLES, attributes: REQUIRED_ATTRIBUTES } },
+        "emigateway.graphql.mutation.VehicleMngStopGeneration": { fn: instance.stopGeneration$, instance, jwtValidation: { roles: WRITE_ROLES, attributes: REQUIRED_ATTRIBUTES } },
+        "emigateway.graphql.query.VehicleMngGenerationStatus": { fn: instance.getGenerationStatus$, instance, jwtValidation: { roles: READ_ROLES, attributes: REQUIRED_ATTRIBUTES } },
       }
     }
   };
 
 
-  /**  
-   * Gets the Vehicle list
-   *
-   * @param {*} args args
+  /**
+   * Starts vehicle generation
    */
-  getGeneratorVehicleListing$({ args }, authToken) {
-    const { filterInput, paginationInput, sortInput } = args;
-    const { queryTotalResultCount = false } = paginationInput || {};
+  startGeneration$({ root, args, jwt }, authToken) {
+    if (this.isGenerating) {
+      return of({ code: 400, message: "Generation is already running" }).pipe(
+        mergeMap(response => CqrsResponseHelper.buildSuccessResponse$(response))
+      );
+    }
 
-    return forkJoin(
-      VehicleDA.getVehicleList$(filterInput, paginationInput, sortInput).pipe(toArray()),
-      queryTotalResultCount ? VehicleDA.getVehicleSize$(filterInput) : of(undefined),
-    ).pipe(
-      map(([listing, queryTotalResultCount]) => ({ listing, queryTotalResultCount })),
-      mergeMap(rawResponse => CqrsResponseHelper.buildSuccessResponse$(rawResponse)),
-      catchError(err => iif(() => err.name === 'MongoTimeoutError', throwError(err), CqrsResponseHelper.handleError$(err)))
+    this.isGenerating = true;
+    this.stopGenerationSubject = new Subject();
+
+    // Start the generation interval
+    const generation$ = interval(50).pipe(
+      takeUntil(this.stopGenerationSubject),
+      tap(() => {
+        const vehicle = this.generateRandomVehicle();
+        const event = this.createVehicleGeneratedEvent(vehicle);
+        
+        // Publish to MQTT as specified in the activity requirements
+        ConsoleLogger.i(`Creating event with: at=${event.at}, et=${event.et}, aid=${event.aid}`);
+        
+        const mqttTopic = 'fleet/vehicles/generated';
+        ConsoleLogger.i(`Publishing vehicle event to MQTT topic: ${mqttTopic}`);
+        
+        this.mqttBroker.send$(mqttTopic, 'vehicle.generated', event).subscribe({
+          next: () => {
+            ConsoleLogger.i(`Vehicle event published to MQTT successfully: ${JSON.stringify(event)}`);
+          },
+          error: (error) => {
+            ConsoleLogger.e(`MQTT publish error: ${error.message}`);
+          }
+        });
+        
+        // Send to WebSocket for UI updates
+        broker.send$(WEBSOCKET_TOPIC, {
+          type: 'VEHICLE_GENERATED',
+          data: vehicle,
+          timestamp: new Date().toISOString()
+        }).subscribe();
+        
+        ConsoleLogger.i(`Vehicle generated: ${JSON.stringify(vehicle)}`);
+      })
+    );
+
+    // Start the generation process
+    generation$.subscribe({
+      complete: () => {
+        this.isGenerating = false;
+        ConsoleLogger.i("Vehicle generation stopped");
+      }
+    });
+
+    return of({ code: 200, message: "Vehicle generation started" }).pipe(
+      mergeMap(response => CqrsResponseHelper.buildSuccessResponse$(response))
     );
   }
-
-  /**  
-   * Gets the get Vehicle by id
-   *
-   * @param {*} args args
-   */
-  getVehicle$({ args }, authToken) {
-    const { id, organizationId } = args;
-    return VehicleDA.getVehicle$(id, organizationId).pipe(
-      mergeMap(rawResponse => CqrsResponseHelper.buildSuccessResponse$(rawResponse)),
-      catchError(err => iif(() => err.name === 'MongoTimeoutError', throwError(err), CqrsResponseHelper.handleError$(err)))
-    );
-
-  }
-
 
   /**
-  * Create a Vehicle
-  */
-  createVehicle$({ root, args, jwt }, authToken) {
-    const aggregateId = uuidv4();
-    const input = {
-      active: false,
-      ...args.input,
+   * Stops vehicle generation
+   */
+  stopGeneration$({ root, args, jwt }, authToken) {
+    if (!this.isGenerating) {
+      return of({ code: 400, message: "Generation is not running" }).pipe(
+        mergeMap(response => CqrsResponseHelper.buildSuccessResponse$(response))
+      );
+    }
+
+    this.stopGenerationSubject.next();
+    this.stopGenerationSubject.complete();
+
+    return of({ code: 200, message: "Vehicle generation stopped" }).pipe(
+      mergeMap(response => CqrsResponseHelper.buildSuccessResponse$(response))
+    );
+  }
+
+  /**
+   * Gets generation status
+   */
+  getGenerationStatus$({ root, args, jwt }, authToken) {
+    return of({ 
+      isGenerating: this.isGenerating,
+      status: this.isGenerating ? "running" : "stopped"
+    }).pipe(
+      mergeMap(response => CqrsResponseHelper.buildSuccessResponse$(response))
+    );
+  }
+
+  /**
+   * Generates a random vehicle
+   */
+  generateRandomVehicle() {
+    const types = ['SUV', 'PickUp', 'Sedan', 'Hatchback', 'Coupe'];
+    const powerSources = ['Electric', 'Gas', 'Hybrid', 'Diesel'];
+    
+    const type = types[Math.floor(Math.random() * types.length)];
+    const powerSource = powerSources[Math.floor(Math.random() * powerSources.length)];
+    const hp = Math.floor(Math.random() * 225) + 75; // 75-300 HP
+    const year = Math.floor(Math.random() * 45) + 1980; // 1980-2024
+    const topSpeed = Math.floor(Math.random() * 200) + 100; // 100-300 km/h
+
+    return {
+      type,
+      powerSource,
+      hp,
+      year,
+      topSpeed
     };
-
-    return VehicleDA.createVehicle$(aggregateId, input, authToken.preferred_username).pipe(
-      mergeMap(aggregate => forkJoin(
-        CqrsResponseHelper.buildSuccessResponse$(aggregate),
-        eventSourcing.emitEvent$(instance.buildAggregateMofifiedEvent('CREATE', 'Vehicle', aggregateId, authToken, aggregate), { autoAcknowledgeKey: process.env.MICROBACKEND_KEY }),
-        broker.send$(MATERIALIZED_VIEW_TOPIC, `GeneratorVehicleModified`, aggregate)
-      )),
-      map(([sucessResponse]) => sucessResponse),
-      catchError(err => iif(() => err.name === 'MongoTimeoutError', throwError(err), CqrsResponseHelper.handleError$(err)))
-    )
   }
 
   /**
-   * updates an Vehicle 
+   * Creates a VehicleGenerated event with proper structure
    */
-  updateVehicle$({ root, args, jwt }, authToken) {
-    const { id, input, merge } = args;
-
-    return (merge ? VehicleDA.updateVehicle$ : VehicleDA.replaceVehicle$)(id, input, authToken.preferred_username).pipe(
-      mergeMap(aggregate => forkJoin(
-        CqrsResponseHelper.buildSuccessResponse$(aggregate),
-        eventSourcing.emitEvent$(instance.buildAggregateMofifiedEvent(merge ? 'UPDATE_MERGE' : 'UPDATE_REPLACE', 'Vehicle', id, authToken, aggregate), { autoAcknowledgeKey: process.env.MICROBACKEND_KEY }),
-        broker.send$(MATERIALIZED_VIEW_TOPIC, `GeneratorVehicleModified`, aggregate)
-      )),
-      map(([sucessResponse]) => sucessResponse),
-      catchError(err => iif(() => err.name === 'MongoTimeoutError', throwError(err), CqrsResponseHelper.handleError$(err)))
-    )
-  }
-
-
-  /**
-   * deletes an Vehicle
-   */
-  deleteVehicles$({ root, args, jwt }, authToken) {
-    const { ids } = args;
-    return forkJoin(
-      VehicleDA.deleteVehicles$(ids),
-      from(ids).pipe(
-        mergeMap(id => eventSourcing.emitEvent$(instance.buildAggregateMofifiedEvent('DELETE', 'Vehicle', id, authToken, {}), { autoAcknowledgeKey: process.env.MICROBACKEND_KEY })),
-        toArray()
-      )
-    ).pipe(
-      map(([ok, esResps]) => ({ code: ok ? 200 : 400, message: `Vehicle with id:s ${JSON.stringify(ids)} ${ok ? "has been deleted" : "not found for deletion"}` })),
-      mergeMap((r) => forkJoin(
-        CqrsResponseHelper.buildSuccessResponse$(r),
-        broker.send$(MATERIALIZED_VIEW_TOPIC, `GeneratorVehicleModified`, { id: 'deleted', name: '', active: false, description: '' })
-      )),
-      map(([cqrsResponse, brokerRes]) => cqrsResponse),
-      catchError(err => iif(() => err.name === 'MongoTimeoutError', throwError(err), CqrsResponseHelper.handleError$(err)))
-    );
-  }
-
-
-  /**
-   * Generate an Modified event 
-   * @param {string} modType 'CREATE' | 'UPDATE' | 'DELETE'
-   * @param {*} aggregateType 
-   * @param {*} aggregateId 
-   * @param {*} authToken 
-   * @param {*} data 
-   * @returns {Event}
-   */
-  buildAggregateMofifiedEvent(modType, aggregateType, aggregateId, authToken, data) {
-    return new Event({
-      eventType: `${aggregateType}Modified`,
-      eventTypeVersion: 1,
-      aggregateType: aggregateType,
-      aggregateId,
-      data: {
-        modType,
-        ...data
-      },
-      user: authToken.preferred_username
-    })
+  createVehicleGeneratedEvent(vehicleData) {
+    const dataString = JSON.stringify(vehicleData);
+    const aid = crypto.createHash('sha256').update(dataString).digest('hex');
+    
+    return {
+      at: "Vehicle",
+      et: "VehicleGenerated",
+      aid: aid,
+      timestamp: new Date().toISOString(),
+      data: vehicleData
+    };
   }
 }
 
