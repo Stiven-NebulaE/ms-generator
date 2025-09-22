@@ -84,7 +84,7 @@ class VehicleCRUD {
     // Start the generation interval
     const generation$ = interval(50).pipe(
       takeUntil(this.stopGenerationSubject),
-      tap(() => {
+      mergeMap(() => {
         const vehicle = this.generateRandomVehicle();
         const event = this.createVehicleGeneratedEvent(vehicle);
         
@@ -94,35 +94,38 @@ class VehicleCRUD {
         const mqttTopic = 'fleet/vehicles/generated';
         ConsoleLogger.i(`Publishing vehicle event to MQTT topic: ${mqttTopic}`);
         
-        this.mqttBroker.send$(mqttTopic, 'vehicle.generated', event).subscribe({
-          next: () => {
+        // Use mergeMap to ensure proper sequencing and avoid duplicate sends
+        return this.mqttBroker.send$(mqttTopic, 'vehicle.generated', event).pipe(
+          tap(() => {
             ConsoleLogger.i(`Vehicle event published to MQTT successfully: ${JSON.stringify(event)}`);
-          },
-          error: (error) => {
-            ConsoleLogger.e(`MQTT publish error: ${error.message}`);
-          }
-        });
-        
-        // Send to WebSocket for UI updates
-        broker.send$(WEBSOCKET_TOPIC, {
-          type: 'VEHICLE_GENERATED',
-          data: vehicle,
-          timestamp: new Date().toISOString()
-        }).subscribe();
-        
-        // Send to materialized view updates for GraphQL subscriptions
-        mqttBroker.send$(MATERIALIZED_VIEW_TOPIC, 'VEHICLE_GENERATED', {
-          type: 'VEHICLE_GENERATED',
-          data: {
-            timestamp: new Date().toISOString(),
-            data: vehicle
-          }
-        }).subscribe({
-          next: () => ConsoleLogger.i(`Materialized view event sent successfully`),
-          error: (error) => ConsoleLogger.e(`Materialized view event error: ${error.message}`)
-        });
-        
-        ConsoleLogger.i(`Vehicle generated: ${JSON.stringify(vehicle)}`);
+          }),
+          mergeMap(() => {
+            // Send to WebSocket for UI updates
+            return broker.send$(WEBSOCKET_TOPIC, {
+              type: 'VEHICLE_GENERATED',
+              data: vehicle,
+              timestamp: new Date().toISOString()
+            });
+          }),
+          mergeMap(() => {
+            // Send to materialized view updates for GraphQL subscriptions
+            return mqttBroker.send$(MATERIALIZED_VIEW_TOPIC, 'VEHICLE_GENERATED', {
+              type: 'VEHICLE_GENERATED',
+              data: {
+                timestamp: new Date().toISOString(),
+                data: vehicle
+              }
+            });
+          }),
+          tap(() => {
+            ConsoleLogger.i(`Materialized view event sent successfully`);
+            ConsoleLogger.i(`Vehicle generated: ${JSON.stringify(vehicle)}`);
+          }),
+          catchError(error => {
+            ConsoleLogger.e(`Error in vehicle generation pipeline: ${error.message}`);
+            return of(null); // Continue processing even if one step fails
+          })
+        );
       })
     );
 
